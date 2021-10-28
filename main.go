@@ -7,6 +7,7 @@ import (
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/xuri/excelize"
 )
 
 type Salary struct {
@@ -55,14 +56,14 @@ func (m *SalaryModel) AddItem(month int, money string) {
 		m.totalTax = totalTax
 
 		//cover tax
-		m.totalIncomeCoverTax += income
-		income2 := calcTotalCoverTax(tax, m.totalIncomeCoverTax)
-		m.totalIncomeCoverTax += income2
-		new_total_tax := calcTotalTax(m.totalIncomeCoverTax)
-		new_tax := new_total_tax - m.totalTaxCoverTax
-		m.totalTaxCoverTax = new_total_tax
+		//m.totalIncomeCoverTax += income
+		//income2 := calcTotalCoverTax(tax, m.totalIncomeCoverTax)
+		//m.totalIncomeCoverTax += income2
+		//new_total_tax := calcTotalTax(m.totalIncomeCoverTax)
+		//new_tax := new_total_tax - m.totalTaxCoverTax
+		//m.totalTaxCoverTax = new_total_tax
 
-		fmt.Println("tax", tax, "income2", income2, "delta", income2-new_tax+tax)
+		//fmt.Println("tax", tax, "income2", income2, "delta", income2-new_tax+tax)
 
 		m.items = append(m.items, &Salary{
 			Index:    month,
@@ -80,7 +81,7 @@ func (m *SalaryModel) AddItem(month int, money string) {
 			AfterTax: "0",
 			CoverTax: "0",
 		}
-		fmt.Println("month", month)
+		//fmt.Println("month", month)
 	}
 }
 
@@ -103,7 +104,7 @@ func (m *SalaryModel) Value(row, col int) interface{} {
 
 	switch col {
 	case 0:
-		return LineEdit{Text: "1"}
+		return item.Index
 
 	case 1:
 		return item.Tax
@@ -131,7 +132,7 @@ func (m *SalaryModel) initCityAverageSalary(pay1, pay2, pay1_from, pay1_to, pay2
 	if e != nil {
 		return e
 	}
-	fmt.Println("city", f_pay1, from, to)
+	//fmt.Println("city", f_pay1, from, to)
 	for index := from; index <= to; index++ {
 		if index < 1 || index > 12 {
 			return errors.New("city average salary: month counter over 12")
@@ -175,7 +176,7 @@ func (m *SalaryModel) initCityAverageSalary(pay1, pay2, pay1_from, pay1_to, pay2
 		}
 		//fmt.Println("city 2", f_pay2, from2, to2)
 	}
-	fmt.Println("city", m.city_average_salary)
+	//fmt.Println("city", m.city_average_salary)
 
 	return nil
 }
@@ -221,7 +222,7 @@ func (m *SalaryModel) initTaxFree(free_money, free_from, free_to string) error {
 		}
 		m.taxFree[index-1] += money
 	}
-	fmt.Println("tax free", m.taxFree)
+	//fmt.Println("tax free", m.taxFree)
 	return nil
 }
 
@@ -317,6 +318,65 @@ func calcTotalCoverTax(tax, money float64) float64 {
 
 }
 
+type FileName struct {
+	Name string
+}
+
+func RunFileNameDialy(owner walk.Form, file *FileName) (int, error) {
+	var dlg *walk.Dialog
+	var db *walk.DataBinder
+	var acceptPB, cancelPB *walk.PushButton
+
+	return Dialog{
+		AssignTo:      &dlg,
+		DefaultButton: &acceptPB,
+		CancelButton: &cancelPB,
+		DataBinder: DataBinder{
+			AssignTo:       &db,
+			Name:           "file",
+			DataSource:     file,
+			ErrorPresenter: ToolTipErrorPresenter{},
+		},
+		MinSize: Size{200, 100},
+		Layout:  VBox{},
+		Children: []Widget{
+			Composite{
+				Layout: Grid{Columns: 2},
+				Children: []Widget{
+					Label{
+						Text: "Name:",
+					},
+					LineEdit{
+						Text: Bind("Name"),
+					},
+				},
+			},
+			Composite{
+				Layout: HBox{},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						AssignTo: &acceptPB,
+						Text:     "OK",
+						OnClicked: func() {
+							if err := db.Submit(); err != nil {
+								return
+							}
+
+							dlg.Accept()
+						},
+					},
+					PushButton{
+						AssignTo:  &cancelPB,
+						Text:      "Cancel",
+						OnClicked: func() { dlg.Cancel() },
+					},
+				},
+			},
+		},
+	}.Run(owner)
+}
+
 func main() {
 	var perMonthPay *walk.LineEdit
 	var month1, month2, month3, month4, month5, month6, month7, month8, month9, month10, month11, month12 *walk.LineEdit
@@ -329,9 +389,11 @@ func main() {
 
 	model := NewSalaryModel()
 
+	var mw *walk.MainWindow
 	var result *walk.TableView
 
 	MainWindow{
+		AssignTo: &mw,
 		Title:  "tax-calc",
 		Size:   Size{1200, 800},
 		Layout: HBox{},
@@ -497,6 +559,7 @@ func main() {
 										fmt.Println("init rate failed", err)
 										return
 									}
+									fmt.Println("rate", insurace_percent.Text())
 									if err := model.initTaxFree(tax_discount_1.Text(), tax_discount_1_from.Text(), tax_discount_1_to.Text()); err != nil {
 										fmt.Println("init tax free failed", err)
 										return
@@ -543,6 +606,33 @@ func main() {
 							{Title: "cover tax"},
 						},
 						Model: model,
+					},
+					PushButton{
+						Text: "Save",
+						OnClicked: func() {
+							file := new(FileName)
+							if cmd, err := RunFileNameDialy(mw, file); err != nil {
+								fmt.Println(err)
+								return
+							} else if cmd == walk.DlgCmdOK {
+								if file.Name == "" {
+									file.Name = "salary"
+								}
+								f := excelize.NewFile()
+								f.SetSheetName("Sheet1", "salary")
+								index := f.GetSheetIndex("salary")
+								f.SetActiveSheet(index)
+								for line, item := range model.items {
+									f.SetCellValue("salary", "A"+strconv.Itoa(line+1), item.Index)
+									f.SetCellValue("salary", "B"+strconv.Itoa(line+1), item.Tax)
+									f.SetCellValue("salary", "C"+strconv.Itoa(line+1), item.AfterTax)
+									f.SetCellValue("salary", "D"+strconv.Itoa(line+1), item.CoverTax)
+								}
+								if err := f.SaveAs(file.Name +".xlsx"); err != nil {
+									fmt.Println("save failed", err)
+								}
+							}
+						},
 					},
 				},
 			},
